@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Fertilization Process Gamification</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f0f0f0;
+    }
+    /* Container screens */
+    .screen {
+      display: none;
+      padding: 20px;
+    }
+    .active {
+      display: block;
+    }
+    h1 {
+      text-align: center;
+    }
+    /* Menu Screen Styles */
+    #menu-screen {
+      text-align: center;
+    }
+    .avatar-option {
+      display: inline-block;
+      margin: 10px;
+      padding: 10px;
+      font-size: 40px;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: border 0.2s;
+    }
+    .avatar-option.selected {
+      border-color: #007bff;
+    }
+    .difficulty-btn {
+      margin: 10px;
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #start-button {
+      margin-top: 20px;
+      padding: 10px 30px;
+      font-size: 18px;
+      cursor: pointer;
+    }
+    /* Quiz Screen Styles */
+    .quiz-question {
+      margin-bottom: 20px;
+    }
+    .quiz-option {
+      margin: 5px 0;
+    }
+    #quiz-submit {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    /* Game Canvas */
+    #game-canvas {
+      background: #fff;
+      border: 2px solid #333;
+      display: block;
+      margin: 0 auto;
+      background: #e6f7ff;
+    }
+    /* Final Screen */
+    #final-screen {
+      text-align: center;
+    }
+    /* Feedback Message */
+    #feedback {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255,255,255,0.9);
+      padding: 10px 20px;
+      border: 2px solid #333;
+      border-radius: 5px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- Feedback Message (for rewards / penalties) -->
+  <div id="feedback"></div>
+  
+  <!-- Menu Screen: Avatar selection, difficulty and start button -->
+  <div id="menu-screen" class="screen active">
+    <h1>Fertilization Process Game</h1>
+    <h2>Select Your Avatar</h2>
+    <div id="avatar-selection">
+      <!-- Using emojis as avatars -->
+      <span class="avatar-option" data-avatar="👩">👩</span>
+      <span class="avatar-option" data-avatar="👨">👨</span>
+      <span class="avatar-option" data-avatar="🧑">🧑</span>
+    </div>
+    <h2>Select Difficulty</h2>
+    <button class="difficulty-btn" data-difficulty="Basic">Basic</button>
+    <button class="difficulty-btn" data-difficulty="Advanced">Advanced</button>
+    <br/>
+    <button id="start-button">Start Game</button>
+  </div>
+
+  <!-- Pre-Game Quiz Screen -->
+  <div id="pregame-quiz-screen" class="screen">
+    <h1>Pre-Game Quiz</h1>
+    <form id="pregame-quiz-form">
+      <div class="quiz-question" data-correct="gamete">
+        <p>1. Which two cells are involved in fertilization?</p>
+        <label class="quiz-option"><input type="radio" name="question1" value="ovum and gamete" required> Ovum and gamete</label><br>
+        <label class="quiz-option"><input type="radio" name="question1" value="gamete and gamete"> Gamete and gamete</label><br>
+        <label class="quiz-option"><input type="radio" name="question1" value="sperm and ovum"> Sperm and ovum</label>
+      </div>
+      <div class="quiz-question" data-correct="23">
+        <p>2. What is the chromosome count of gametes before fertilization?</p>
+        <label class="quiz-option"><input type="radio" name="question2" value="46" required> 46</label><br>
+        <label class="quiz-option"><input type="radio" name="question2" value="23"> 23</label><br>
+        <label class="quiz-option"><input type="radio" name="question2" value="22"> 22</label>
+      </div>
+      <button type="submit" id="quiz-submit">Submit Answers</button>
+    </form>
+  </div>
+
+  <!-- Game Screen -->
+  <div id="game-screen" class="screen">
+    <h1>Fertilization Journey</h1>
+    <canvas id="game-canvas" width="800" height="600"></canvas>
+  </div>
+
+  <!-- In–Game Quiz Overlay (for barrier challenges) -->
+  <div id="ingame-quiz-screen" class="screen" style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); display:none;">
+    <div style="background:#fff; margin: 50px auto; padding: 20px; width:80%; max-width:500px; border-radius:10px;">
+      <h2 id="ingame-quiz-title">Quiz Time!</h2>
+      <form id="ingame-quiz-form">
+        <div id="ingame-quiz-content"></div>
+        <button type="submit" id="ingame-quiz-submit">Submit</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Final Screen -->
+  <div id="final-screen" class="screen">
+    <h1>Congratulations!</h1>
+    <p id="final-message"></p>
+    <p>Your final score: <span id="final-score"></span></p>
+    <button id="restart-button">Play Again</button>
+  </div>
+
+  <script>
+    /* ==================== Global Variables ==================== */
+    let selectedAvatar = null;
+    let difficulty = "Basic";
+    let magicStick = false; // Awarded if pre-game quiz answers are correct.
+    let score = 0;
+    let gamePhase = "spermJourney"; // main game phases: spermJourney, zonaChallenge, membraneChallenge, zygoteFormation, done.
+    
+    // Canvas and game objects
+    const canvas = document.getElementById("game-canvas");
+    const ctx = canvas.getContext("2d");
+    let sperm, egg, corona, zona, membrane, pronuclei;
+    let keysPressed = {};
+    let gamePaused = false;
+    
+    // In–game quiz queue and callback (so that we can pause game and resume after quiz)
+    let currentQuiz = null; // {questions: [ {question, options, correct} ], onComplete: function(success){} }
+
+    /* ==================== Helper Functions ==================== */
+    function showScreen(screenId) {
+      document.querySelectorAll(".screen").forEach(screen => {
+        screen.classList.remove("active");
+      });
+      const screen = document.getElementById(screenId);
+      if (screen) screen.classList.add("active");
+    }
+    
+    function showFeedback(message, duration=2000) {
+      const feedbackEl = document.getElementById("feedback");
+      feedbackEl.innerText = message;
+      feedbackEl.style.display = "block";
+      setTimeout(() => {
+        feedbackEl.style.display = "none";
+      }, duration);
+    }
+    
+    function resetGameObjects() {
+      // Initialize sperm at left side
+      sperm = { x: 50, y: canvas.height/2, r: 10, color: "red" };
+      // Egg (MII oocyte) on the right side
+      egg = { x: canvas.width - 100, y: canvas.height/2, r: 50, color: "pink" };
+      // Corona Radiata: a rectangular barrier between sperm and egg
+      corona = { x: 200, y: 100, width: 400, height: 400, active: true, color: "#a0d8f1" };
+      // Zona Pellucida: represented as a ring around the egg
+      zona = { x: egg.x, y: egg.y, outerR: 70, innerR: 55, active: true, color: "#f7d794" };
+      // Oocyte Membrane is the inner circle of the egg.
+      membrane = { x: egg.x, y: egg.y, r: 50, active: true, color: "#ffb3b3" };
+      // For final stage: pronuclei (if needed)
+      pronuclei = [
+        { x: egg.x - 20, y: egg.y, r: 15, color: "blue", dragging: false },
+        { x: egg.x + 20, y: egg.y, r: 15, color: "purple", dragging: false }
+      ];
+      gamePhase = "spermJourney";
+    }
+    
+    function rectIntersect(x, y, w, h, cx, cy, cr) {
+      // Check if circle (center cx,cy, radius cr) intersects rectangle
+      let testX = cx;
+      let testY = cy;
+      if (cx < x) testX = x;
+      else if (cx > x + w) testX = x + w;
+      if (cy < y) testY = y;
+      else if (cy > y + h) testY = y + h;
+      let distX = cx - testX;
+      let distY = cy - testY;
+      return (distX * distX + distY * distY) <= cr * cr;
+    }
+    
+    function circleRingIntersect(cx, cy, cr, ringCenterX, ringCenterY, innerR, outerR) {
+      // Check if circle center is within the ring boundaries.
+      let d = Math.hypot(cx - ringCenterX, cy - ringCenterY);
+      return (d + cr > innerR && d - cr < outerR);
+    }
+    
+    /* ==================== Screen Event Listeners ==================== */
+    // Avatar selection
+    document.querySelectorAll(".avatar-option").forEach(el => {
+      el.addEventListener("click", () => {
+        document.querySelectorAll(".avatar-option").forEach(a => a.classList.remove("selected"));
+        el.classList.add("selected");
+        selectedAvatar = el.getAttribute("data-avatar");
+      });
+    });
+    
+    // Difficulty selection
+    document.querySelectorAll(".difficulty-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        difficulty = btn.getAttribute("data-difficulty");
+        // Highlight selected button
+        document.querySelectorAll(".difficulty-btn").forEach(b => b.style.background = "");
+        btn.style.background = "#007bff";
+        btn.style.color = "#fff";
+      });
+    });
+    
+    // Start button goes to pre–game quiz screen
+    document.getElementById("start-button").addEventListener("click", () => {
+      if (!selectedAvatar) {
+        alert("Please select an avatar!");
+        return;
+      }
+      showScreen("pregame-quiz-screen");
+    });
+    
+    // Pre–Game Quiz Submission
+    document.getElementById("pregame-quiz-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      // Check answers (in this simple example, correct answers are "Sperm and ovum" and "23")
+      const q1 = document.querySelector("input[name='question1']:checked").value;
+      const q2 = document.querySelector("input[name='question2']:checked").value;
+      let correctCount = 0;
+      if (q1 === "Sperm and ovum") { correctCount++; }
+      if (q2 === "23") { correctCount++; }
+      if (correctCount === 2) {
+        magicStick = true;
+        score += 10;
+        showFeedback("Great job! You earned the Magic Stick and 10 points!");
+      } else {
+        showFeedback("Some answers were incorrect. No Magic Stick, but you can try to earn points later.", 3000);
+      }
+      // After quiz, start the game
+      resetGameObjects();
+      showScreen("game-screen");
+      requestAnimationFrame(gameLoop);
+    });
+    
+    // In–game quiz submission (used for barrier challenges)
+    document.getElementById("ingame-quiz-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      // Collect answers from radio buttons in the current quiz overlay
+      const formData = new FormData(e.target);
+      let allCorrect = true;
+      currentQuiz.questions.forEach((q, idx) => {
+        const answer = formData.get("q" + idx);
+        if (answer !== q.correct) {
+          allCorrect = false;
+        }
+      });
+      // Clear the quiz overlay
+      hideIngameQuiz();
+      // Callback to game logic with result
+      if (currentQuiz && typeof currentQuiz.onComplete === "function") {
+        currentQuiz.onComplete(allCorrect);
+      }
+      currentQuiz = null;
+      // Resume game if needed
+      gamePaused = false;
+    });
+    
+    // Restart game
+    document.getElementById("restart-button").addEventListener("click", () => {
+      score = 0;
+      magicStick = false;
+      selectedAvatar = null;
+      difficulty = "Basic";
+      showScreen("menu-screen");
+    });
+    
+    /* ==================== In-Game Quiz Overlay Functions ==================== */
+    function showIngameQuiz(title, questions, onComplete) {
+      gamePaused = true;
+      currentQuiz = { questions, onComplete };
+      document.getElementById("ingame-quiz-title").innerText = title;
+      const contentDiv = document.getElementById("ingame-quiz-content");
+      contentDiv.innerHTML = "";
+      questions.forEach((q, idx) => {
+        const qDiv = document.createElement("div");
+        qDiv.className = "quiz-question";
+        const p = document.createElement("p");
+        p.innerText = q.question;
+        qDiv.appendChild(p);
+        q.options.forEach(opt => {
+          const label = document.createElement("label");
+          label.className = "quiz-option";
+          const radio = document.createElement("input");
+          radio.type = "radio";
+          radio.name = "q" + idx;
+          radio.value = opt;
+          radio.required = true;
+          label.appendChild(radio);
+          label.appendChild(document.createTextNode(" " + opt));
+          qDiv.appendChild(label);
+          qDiv.appendChild(document.createElement("br"));
+        });
+        contentDiv.appendChild(qDiv);
+      });
+      document.getElementById("ingame-quiz-screen").style.display = "block";
+    }
+    
+    function hideIngameQuiz() {
+      document.getElementById("ingame-quiz-screen").style.display = "none";
+    }
+    
+    /* ==================== Game Logic ==================== */
+    // Listen for keyboard input for sperm movement
+    document.addEventListener("keydown", (e) => {
+      keysPressed[e.key] = true;
+    });
+    document.addEventListener("keyup", (e) => {
+      keysPressed[e.key] = false;
+    });
+    
+    // For dragging pronuclei in final stage
+    let draggingPronucleus = null;
+    canvas.addEventListener("mousedown", (e) => {
+      if (gamePhase !== "zygoteFormation") return;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      pronuclei.forEach(p => {
+        if (Math.hypot(mouseX - p.x, mouseY - p.y) < p.r) {
+          p.dragging = true;
+          draggingPronucleus = p;
+        }
+      });
+    });
+    canvas.addEventListener("mousemove", (e) => {
+      if (gamePhase !== "zygoteFormation") return;
+      if (draggingPronucleus) {
+        const rect = canvas.getBoundingClientRect();
+        draggingPronucleus.x = e.clientX - rect.left;
+        draggingPronucleus.y = e.clientY - rect.top;
+      }
+    });
+    canvas.addEventListener("mouseup", (e) => {
+      if (gamePhase !== "zygoteFormation") return;
+      if (draggingPronucleus) {
+        draggingPronucleus.dragging = false;
+        draggingPronucleus = null;
+        // Check if pronuclei have fused (centers close enough)
+        const d = Math.hypot(pronuclei[0].x - pronuclei[1].x, pronuclei[0].y - pronuclei[1].y);
+        if (d < 20) {
+          // Show final quiz before ending game
+          showIngameQuiz("Final Quiz", [
+            { 
+              question: "When does the MII oocyte resume meiosis?", 
+              options: ["After sperm-oocyte fusion", "Before fertilization", "At ovulation"], 
+              correct: "After sperm-oocyte fusion" 
+            }
+          ], (result) => {
+            if (result) {
+              score += 20;
+              showFeedback("Correct! Final 20 points awarded!");
+            } else {
+              showFeedback("Incorrect answer.", 3000);
+            }
+            // End game and show final screen
+            gamePhase = "done";
+          });
+        }
+      }
+    });
+    
+    // Main game loop
+    function gameLoop() {
+      if (!gamePaused && gamePhase !== "done") {
+        updateGame();
+      }
+      drawGame();
+      if (gamePhase !== "done") {
+        requestAnimationFrame(gameLoop);
+      } else {
+        // When game ends, show final screen after a short delay
+        setTimeout(() => {
+          document.getElementById("final-score").innerText = score;
+          document.getElementById("final-message").innerText = magicStick ? "You used your Magic Stick to help out!" : "Better luck next time!";
+          showScreen("final-screen");
+        }, 1000);
+      }
+    }
+    
+    function updateGame() {
+      // Move sperm if arrow keys pressed (speed depends on difficulty)
+      let speed = difficulty === "Advanced" ? 4 : 2;
+      if (keysPressed["ArrowUp"] || keysPressed["w"]) sperm.y -= speed;
+      if (keysPressed["ArrowDown"] || keysPressed["s"]) sperm.y += speed;
+      if (keysPressed["ArrowLeft"] || keysPressed["a"]) sperm.x -= speed;
+      if (keysPressed["ArrowRight"] || keysPressed["d"]) sperm.x += speed;
+      // Constrain sperm inside canvas
+      sperm.x = Math.max(sperm.r, Math.min(canvas.width - sperm.r, sperm.x));
+      sperm.y = Math.max(sperm.r, Math.min(canvas.height - sperm.r, sperm.y));
+      
+      // Phase 1: Sperm Journey and Corona Radiata challenge
+      if (gamePhase === "spermJourney" && corona.active) {
+        // When sperm hits the corona region, trigger quiz challenge
+        if (rectIntersect(corona.x, corona.y, corona.width, corona.height, sperm.x, sperm.y, sperm.r)) {
+          // Pause game and show quiz for corona radiata
+          showIngameQuiz("Corona Radiata Challenge", [
+            { 
+              question: "What enzyme helps sperm pass through the corona radiata?", 
+              options: ["Hyaluronidase", "Protease", "Lipase"], 
+              correct: "Hyaluronidase" 
+            },
+            { 
+              question: "What assisted reproductive technology exists for male infertility?", 
+              options: ["IVF", "IUI", "Both"], 
+              correct: "Both" 
+            }
+          ], (result) => {
+            if (result) {
+              score += 15;
+              showFeedback("Correct! Corona barrier dissolved. +15 points");
+              corona.active = false; // remove barrier
+              gamePhase = "zonaChallenge"; // move to next challenge
+            } else {
+              showFeedback("Incorrect answers. Try again!", 3000);
+            }
+          });
+        }
+      }
+      
+      // Phase 2: Zona Pellucida challenge
+      if (gamePhase === "zonaChallenge" && zona.active) {
+        if (circleRingIntersect(sperm.x, sperm.y, sperm.r, zona.x, zona.y, zona.innerR, zona.outerR)) {
+          showIngameQuiz("Zona Pellucida Challenge", [
+            { 
+              question: "What receptor in ZP facilitates sperm attachment?", 
+              options: ["ZP3", "ZP2", "ZP1"], 
+              correct: "ZP3" 
+            },
+            { 
+              question: "What is the space between the zona pellucida and the oocyte membrane?", 
+              options: ["Perivitelline space", "Cytoplasm", "Zona gap"], 
+              correct: "Perivitelline space" 
+            }
+          ], (result) => {
+            if (result) {
+              score += 15;
+              showFeedback("Correct! Acrosome reaction activated. +15 points");
+              zona.active = false; // unlock the zona barrier
+              gamePhase = "membraneChallenge";
+              // Change sperm color to indicate acrosome reaction
+              sperm.color = "orange";
+            } else {
+              showFeedback("Incorrect answers. Try again!", 3000);
+            }
+          });
+        }
+      }
+      
+      // Phase 3: Oocyte Membrane Challenge
+      if (gamePhase === "membraneChallenge" && membrane.active) {
+        // If sperm enters inside the egg (membrane circle)
+        let d = Math.hypot(sperm.x - membrane.x, sperm.y - membrane.y);
+        if (d < membrane.r) {
+          showIngameQuiz("Oocyte Membrane Challenge", [
+            { 
+              question: "What events occur after sperm-oocyte membrane fusion?", 
+              options: ["Calcium wave activation", "Cortical granule release", "Both"], 
+              correct: "Both" 
+            },
+            { 
+              question: "What is the function of cortical granule release?", 
+              options: ["Prevent polyspermy", "Aid sperm entry", "Stimulate zygote growth"], 
+              correct: "Prevent polyspermy" 
+            }
+          ], (result) => {
+            if (result) {
+              score += 20;
+              showFeedback("Fusion successful! +20 points");
+              membrane.active = false;
+              // Transition to final phase: zygote formation (pronuclei fusion)
+              gamePhase = "zygoteFormation";
+            } else {
+              showFeedback("Incorrect answers. Try again!", 3000);
+            }
+          });
+        }
+      }
+      
+      // In zygoteFormation phase, user drags pronuclei on canvas (handled by mouse events)
+    }
+    
+    function drawGame() {
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw egg (MII oocyte) if not yet fused
+      if (gamePhase !== "zygoteFormation") {
+        // Draw egg outer circle
+        ctx.beginPath();
+        ctx.arc(egg.x, egg.y, egg.r, 0, Math.PI * 2);
+        ctx.fillStyle = egg.color;
+        ctx.fill();
+        ctx.closePath();
+      }
+      
+      // Draw corona radiata if active
+      if (corona.active) {
+        ctx.fillStyle = corona.color;
+        ctx.fillRect(corona.x, corona.y, corona.width, corona.height);
+      }
+      
+      // Draw zona pellucida if active
+      if (zona.active) {
+        ctx.beginPath();
+        ctx.arc(zona.x, zona.y, zona.outerR, 0, Math.PI * 2);
+        ctx.arc(zona.x, zona.y, zona.innerR, 0, Math.PI * 2, true);
+        ctx.fillStyle = zona.color;
+        ctx.fill();
+        ctx.closePath();
+      }
+      
+      // Draw oocyte membrane if active
+      if (membrane.active) {
+        ctx.beginPath();
+        ctx.arc(membrane.x, membrane.y, membrane.r, 0, Math.PI * 2);
+        ctx.strokeStyle = "#ff0000";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.closePath();
+      }
+      
+      // Draw sperm (unless in final stage)
+      if (gamePhase !== "zygoteFormation") {
+        ctx.beginPath();
+        ctx.arc(sperm.x, sperm.y, sperm.r, 0, Math.PI * 2);
+        ctx.fillStyle = sperm.color;
+        ctx.fill();
+        ctx.closePath();
+      }
+      
+      // Draw pronuclei in final phase
+      if (gamePhase === "zygoteFormation") {
+        pronuclei.forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fillStyle = p.color;
+          ctx.fill();
+          ctx.closePath();
+        });
+        // Optionally draw a faint outline around the egg to guide placement
+        ctx.beginPath();
+        ctx.arc(egg.x, egg.y, egg.r, 0, Math.PI * 2);
+        ctx.strokeStyle = "#666";
+        ctx.setLineDash([5, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.closePath();
+      }
+      
+      // Optionally, display score on canvas
+      ctx.fillStyle = "#000";
+      ctx.font = "16px Arial";
+      ctx.fillText("Score: " + score, 10, 20);
+    }
+  </script>
+</body>
+</html>
